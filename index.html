@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>مُسمِّع القرآن</title>
+<style>
+  :root { --bg:#fff8e7; --text:#222; --ok:#1b7f3b; --bad:#d11; --card:#fff; --accent:#1b7f3b; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#14181a; --text:#eee; --ok:#4cd27a; --bad:#ff6b6b; --card:#1f2528; --accent:#2e9c52; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:"Amiri","Traditional Arabic",serif; background:var(--bg); color:var(--text); }
+  header { padding:14px; text-align:center; font-size:20px; background:var(--accent); color:#fff; }
+  select { display:block; margin:12px auto; padding:8px; font-size:17px; font-family:inherit; }
+  #mushaf { margin:10px; padding:18px; background:var(--card); border-radius:14px; font-size:30px; line-height:2.2; text-align:center; min-height:200px; }
+  .w { display:inline-block; margin:0 5px; }
+  .ok { color:var(--ok); }
+  .bad { color:var(--bad); font-weight:bold; }
+  #bar { text-align:center; padding:10px; font-size:18px; }
+  #btn { display:block; margin:10px auto 30px; width:84px; height:84px; border-radius:50%; border:none; background:var(--accent); color:#fff; font-size:34px; }
+  #btn.on { background:var(--bad); }
+  #msg { text-align:center; padding:0 14px; font-size:15px; opacity:.8; }
+</style>
+</head>
+<body>
+<header>مُسمِّع القرآن</header>
+<select id="sura"></select>
+<div id="mushaf"></div>
+<div id="bar">عدد الأخطاء: <span id="errs">0</span></div>
+<button id="btn">🎤</button>
+<div id="msg">اضغط الميكروفون وابدأ التلاوة من أول السورة</div>
+
+<script>
+const SURAS = {
+  "الفاتحة": [
+    "بِسْمِ ٱللَّهِ ٱلرَّحْمَٰنِ ٱلرَّحِيمِ",
+    "ٱلْحَمْدُ لِلَّهِ رَبِّ ٱلْعَٰلَمِينَ",
+    "ٱلرَّحْمَٰنِ ٱلرَّحِيمِ",
+    "مَٰلِكِ يَوْمِ ٱلدِّينِ",
+    "إِيَّاكَ نَعْبُدُ وَإِيَّاكَ نَسْتَعِينُ",
+    "ٱهْدِنَا ٱلصِّرَٰطَ ٱلْمُسْتَقِيمَ",
+    "صِرَٰطَ ٱلَّذِينَ أَنْعَمْتَ عَلَيْهِمْ غَيْرِ ٱلْمَغْضُوبِ عَلَيْهِمْ وَلَا ٱلضَّآلِّينَ"
+  ],
+  "الإخلاص": [
+    "قُلْ هُوَ ٱللَّهُ أَحَدٌ",
+    "ٱللَّهُ ٱلصَّمَدُ",
+    "لَمْ يَلِدْ وَلَمْ يُولَدْ",
+    "وَلَمْ يَكُن لَّهُۥ كُفُوًا أَحَدٌۢ"
+  ]
+};
+
+const $ = id => document.getElementById(id);
+let words = [], spans = [], errors = 0, rec = null, listening = false;
+
+function normalize(s) {
+  return s
+    .replace(/[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED\u0640]/g, "")
+    .replace(/[إأآٱ]/g, "ا").replace(/ى/g, "ي").replace(/ة/g, "ه")
+    .replace(/ا/g, "");
+}
+
+function beep() {
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const o = ctx.createOscillator(), g = ctx.createGain();
+  o.frequency.value = 440; o.connect(g); g.connect(ctx.destination);
+  g.gain.value = 0.3; o.start(); o.stop(ctx.currentTime + 0.25);
+}
+
+function render(name) {
+  const ayat = SURAS[name];
+  words = ayat.flatMap(a => a.split(" "));
+  const box = $("mushaf"); box.innerHTML = ""; spans = [];
+  ayat.forEach((a, i) => {
+    a.split(" ").forEach(w => {
+      const s = document.createElement("span");
+      s.className = "w"; s.textContent = w; box.appendChild(s); spans.push(s);
+    });
+    const n = document.createElement("span");
+    n.className = "w"; n.textContent = "﴿" + (i + 1) + "﴾"; box.appendChild(n);
+  });
+  errors = 0; $("errs").textContent = 0;
+}
+
+function compare(heard) {
+  const spoken = heard.split(/\s+/).filter(Boolean);
+  let errs = 0;
+  spans.forEach((s, i) => {
+    s.classList.remove("ok", "bad");
+    if (i < spoken.length) {
+      const good = normalize(spoken[i]) === normalize(words[i]);
+      s.classList.add(good ? "ok" : "bad");
+      if (!good) errs++;
+    }
+  });
+  if (errs > errors) beep();
+  errors = errs; $("errs").textContent = errs;
+}
+
+function start() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { $("msg").textContent = "المتصفح لا يدعم التعرف على الصوت. استخدم Chrome."; return; }
+  render($("sura").value);
+  rec = new SR();
+  rec.lang = "ar-SA"; rec.continuous = true; rec.interimResults = true;
+  rec.onresult = e => {
+    let t = "";
+    for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript + " ";
+    compare(t.trim());
+  };
+  rec.onend = () => { if (listening) { try { rec.start(); } catch (_) {} } };
+  rec.onerror = e => { if (e.error === "not-allowed") { $("msg").textContent = "اسمح للمتصفح باستخدام الميكروفون."; stop(); } };
+  rec.start(); listening = true;
+  $("btn").classList.add("on"); $("btn").textContent = "⏹";
+  $("msg").textContent = "أنا أسمعك... ابدأ التلاوة";
+}
+
+function stop() {
+  listening = false; if (rec) rec.stop();
+  $("btn").classList.remove("on"); $("btn").textContent = "🎤";
+  $("msg").textContent = "توقف التسجيل. اضغط الميكروفون للبدء من جديد";
+}
+
+Object.keys(SURAS).forEach(n => { const o = document.createElement("option"); o.value = o.textContent = n; $("sura").appendChild(o); });
+$("sura").onchange = () => { if (listening) stop(); render($("sura").value); };
+$("btn").onclick = () => listening ? stop() : start();
+render(Object.keys(SURAS)[0]);
+</script>
+</body>
+</html>
